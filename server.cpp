@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include "./structures.h"
+#include <cmath>
 
 using namespace std;
 
@@ -114,6 +115,36 @@ struct udp_msg handle_udp_messages(int udp_sock) {
             strcpy(udp_message.data, to_string(number).c_str());
         }
     }
+    if (type == 1) { //SHORT_REAL
+        udp_message.type = 1;
+        memcpy(udp_message.data_type, "SHORT_REAL", MAX_DATA_TYPE);
+        float number = abs (ntohs(*(uint16_t *)msg));
+        snprintf(udp_message.data, sizeof(udp_message.data), "%.2f", number / 100);
+    }
+    if (type == 2) { // FLOAT
+        udp_message.type = 2;
+        memcpy(udp_message.data_type, "FLOAT", MAX_DATA_TYPE);
+        char sign = msg[0]; 
+        uint32_t int_part_network;
+        memcpy(&int_part_network, msg + 1, sizeof(uint32_t));
+        uint32_t int_part = ntohl(int_part_network);
+        uint8_t power;
+        memcpy(&power, msg + 1 + sizeof(uint32_t), sizeof(uint8_t));
+        
+        double real_number = int_part * std::pow(10, -power);
+
+        if (sign == 1) {
+            real_number = -real_number;
+        }
+        snprintf(udp_message.data, 1500, "%.*f", power, real_number);
+    }
+
+    if (type == 3) {
+        udp_message.type = 3;
+        memcpy(udp_message.data_type, "STRING", MAX_DATA_TYPE);
+        strncpy(udp_message.data, msg, 1500);
+    }
+
     memset(udp_message.result, 0, MAX_UDP_MSG_SIZE);
     udp_message.port = ntohs(client_addr.sin_port);
     strcpy(udp_message.ip, inet_ntoa(client_addr.sin_addr));
