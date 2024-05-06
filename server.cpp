@@ -15,8 +15,115 @@
 
 using namespace std;
 
-int main(int argc, char *argv[]) {
+void handle_stdin_input(const unordered_map<string, Client>& clients, int tcp_sock, int udp_sock) {
+    string com;
+    cin >> com;
+
+    if (com == "exit") {
+        for (auto& pair : clients) {
+            uint32_t size = 4;
+            int rc = send(pair.second.socket, &size, sizeof(uint32_t), 0);
+            rc = send(pair.second.socket, "exit", size, 0);
+
+            close(pair.second.socket);
+        }
+
+        close(udp_sock);
+        close(tcp_sock);
+        exit(0);
+    }
+}
+
+void handle_tcp_client_connection(int tcp_sock, unordered_map<string, Client>& clients, fd_set& read_fd, int& max_fd) {
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    int new_client = accept(tcp_sock, (struct sockaddr *) &client_addr, &client_len);
+    DIE(new_client < 0, "accept");
+
+    struct tcp_msg client_tcp_msg;
+    memset(&client_tcp_msg, 0, sizeof(tcp_msg));
+
+    int rc = (int) recv(new_client, &client_tcp_msg, sizeof(tcp_msg), 0);
+    DIE(rc < 0, "recv error");
+
+    string client_id = client_tcp_msg.data;
+
+    if (clients.find(client_id) != clients.end()) {
+        if (!clients[client_id].active) {
+            clients[client_id].socket = new_client;
+            clients[client_id].active = true;
+        } else {
+            close(new_client);
+            cout << "client is active: " << clients[client_id].active << "\n";
+            cout << "Client " << client_id << " already connected.\n";
+            return;
+        }
+    } else {
+        clients[client_id] = {new_client, true, client_id, ""};
+    }
+
+    FD_SET(new_client, &read_fd);
+    max_fd = max(new_client, max_fd);
+
+    auto string_address = inet_ntoa(client_addr.sin_addr);
+    auto string_port = ntohs(client_addr.sin_port);
+
+    cout << "New client " << client_id << " connected from " <<
+         string_address << ":" << string_port << "\n";
+}
+
+struct udp_msg handle_udp_messages(int udp_sock) {
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    struct udp_msg udp_message;
+    char buffer[MAX_UDP_MSG_SIZE];
     
+    int rc = recvfrom(udp_sock, buffer, MAX_UDP_MSG_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
+    DIE (rc < 0, "recvfrom handle_udp error\n");
+
+    memset(udp_message.topic, 0, TOPIC_LEN + 1);
+    memcpy(udp_message.topic, buffer, 50); // VEZI aici cum gestionezi topicul cu wildcarduri
+    memset(udp_message.data, 0, MAX_UDP_PAYLOAD_SIZE + 1);
+
+    char msg[MAX_UDP_PAYLOAD_SIZE + 1];
+    memset(msg, 0, MAX_UDP_PAYLOAD_SIZE + 1);
+    memcpy(msg, buffer + TOPIC_LEN + 1, MAX_UDP_PAYLOAD_SIZE);
+
+    uint8_t type;
+    memcpy(&type, buffer + TOPIC_LEN, sizeof(uint8_t));
+
+    if (type == 0) {
+        udp_message.type = 0; // TIP INT
+        memcpy(udp_message.data_type, "INT", MAX_DATA_TYPE);
+        uint32_t number;
+        memcpy(&number, msg + 1, sizeof(uint32_t));
+        number = ntohl(number);
+        if (msg[0] == 1) { // daca avem un octet de semn 1 atunci avem un numar negativ
+            strcpy(udp_message.data, "-");
+            memcpy(udp_message.data + 1, &number, sizeof(number));
+        } else {
+            memcpy(udp_message.data, &number, sizeof(number));
+            cout << "Numarul este: " << number << "\n"; 
+        }
+    }
+
+    memset(udp_message.result, 0, MAX_UDP_MSG_SIZE);
+    udp_message.port = ntohs(client_addr.sin_port);
+    memcpy(udp_message.ip, inet_ntoa(client_addr.sin_addr), sizeof(inet_ntoa(client_addr.sin_addr)));
+    strcpy(udp_message.result, udp_message.ip);
+    strcat(udp_message.result, ":");
+    strcat(udp_message.result, to_string(udp_message.port).c_str());
+    strcat(udp_message.result, " - ");
+    strcat(udp_message.result, udp_message.topic);
+    strcat(udp_message.result, " - ");
+    strcat(udp_message.result, udp_message.data_type);
+    strcat(udp_message.result, " - ");
+    strcat(udp_message.result, udp_message.data);
+
+    return udp_message;
+}
+
+int main(int argc, char *argv[]) {
     DIE(argc != 2, "bad arguments");
 
     setvbuf(stdout, NULL, _IONBF, BUFSIZ);
@@ -80,80 +187,47 @@ int main(int argc, char *argv[]) {
             if (FD_ISSET(i, &temp_fd)) {
 
                 if (i == STDIN_FILENO) {
-                    string com;
-                    cin >> com;
-
-                    if (com == "exit") {
-                        for (auto& pair : clients) {
-                            close(pair.second.socket);
-                        }
-
-                        close(udp_sock);
-                        close(tcp_sock);
-                        return 0;
-                    }
+                    handle_stdin_input(clients, tcp_sock, udp_sock);
                 }
 
-                // handle the case where the messages are coming on tcp
                 if (i == tcp_sock) {
-                    flag = 1;
-                    rc = setsockopt(tcp_sock, IPPROTO_TCP, TCP_NODELAY, (const void*) &flag, sizeof(int));
-                    DIE (rc < 0, "nagle's alg");
+                    handle_tcp_client_connection(tcp_sock, clients, read_fd, max_fd);
+                }
 
-                    struct sockaddr_in client_addr;
-                    socklen_t client_len = sizeof(client_addr);
-                    int new_client = accept(tcp_sock, (struct sockaddr *) &client_addr, &client_len);
-                    DIE (new_client < 0, "accept");
-
-                    struct tcp_msg client_tcp_msg;
-                    memset(&client_tcp_msg, 0, sizeof(tcp_msg));
-
-                    rc = (int) recv(new_client, &client_tcp_msg, sizeof(tcp_msg), 0);
-                    DIE(rc < 0, "recv error");
-
-                    string client_id = client_tcp_msg.data;
-
-                    if (clients.find(client_id) != clients.end()) {
-                        if (!clients[client_id].active) {
-                            // Dacă clientul este inactiv, îl marcam ca activ și actualizăm socketul asociat
-                            clients[client_id].socket = new_client;
-                            clients[client_id].active = true;
-                        } else {
-                            close(new_client);
-                            cout << "Client " << client_id << " already connected.\n";
-                            continue;
+                if (i == udp_sock) {
+                    struct udp_msg udp_message;
+                    // udp_message.port = ntohs()
+                    udp_message = handle_udp_messages(udp_sock);
+                    // uint32_t size = strlen(udp_message.)
+                    for (auto client : clients) {
+                        if (client.second.active && strcmp(client.second.topic, udp_message.topic) == 0) {
+                            uint32_t size = strlen(udp_message.result);
+                            int bytes_sent = send(client.second.socket, &size, sizeof(uint32_t), 0);
+                            DIE (rc < 0, "send error in main");
+                            bytes_sent = send(client.second.socket, &udp_message, sizeof(udp_message), 0);
+                            DIE (rc < 0, "send error in main");
                         }
-                    } else {
-                        // Dacă clientul nu există în map, îl adăugăm cu starea activă
-                        clients[client_id] = {new_client, true, client_id};
+                    }
+                }
+
+                struct subscribe_msg msg;
+                uint32_t size;
+                rc = recv(i, &size, sizeof(uint32_t), 0);
+                rc = recv(i, &msg, size, 0);
+
+                if (rc == 0) {
+                    for (auto it = clients.begin(); it != clients.end(); ++it) {
+                        if (it->second.socket == i) {
+                            it->second.active = false;
+                            cout << "Client " << it->second.id << " disconnected.\n";
+                            FD_CLR(i, &read_fd);
+                            close(i);
+                            clients.erase(it);
+                            break;
+                        }
                     }
 
-
-                    FD_SET(new_client, &read_fd);
-
-                    max_fd = max(new_client, max_fd);
-
-                    auto string_address = inet_ntoa(client_addr.sin_addr);
-                    auto string_port = ntohs(client_addr.sin_port);
-
-                    cout << "New client " << client_id << " connected from " <<
-                         string_address << ":" << string_port << "\n";
                 }
-
-                // handle the case where the messages are coming on udp
-                if (i == udp_sock) {
-                    struct sockaddr_in client_addr;
-                    socklen_t client_len = sizeof(client_addr);
-                    struct udp_msg udp_message;
-                    
-                    // Receive the UDP message
-                    rc = recvfrom(udp_sock, &udp_message, sizeof(udp_message), 0, (struct sockaddr *)&client_addr, &client_len);
-                    DIE(rc < 0, "recvfrom error");
-
-                    // Process the received UDP message
-                    // Here you can implement your logic to handle the received message
-                }
-
             }
         }
     }
