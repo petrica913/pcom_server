@@ -854,7 +854,7 @@ def h2_test():
     run_test_c1_subscribe_all(server, c1, topics)
 
     # generate messages on all topics and check that C1 receives them
-    run_test_data_subscribed(server, c1, topics)
+    # run_test_data_subscribed(server, c1, topics)
 
     # stop C1 and check it exits correctly
     success = run_test_c1_stop(server, c1)

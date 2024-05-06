@@ -53,13 +53,22 @@ void handle_tcp_client_connection(int tcp_sock, unordered_map<string, Client>& c
             clients[client_id].socket = new_client;
             clients[client_id].active = true;
         } else {
+            char msg[5] = "exit";
+            uint32_t size = strlen(msg);
+
+            // send exit message to client
+            rc = send(new_client, &size, sizeof(uint32_t), 0);
+            DIE(rc < 0, "send() failed");
+
+            rc = send(new_client, msg, size, 0);
+            DIE(rc < 0, "send() failed");
+            FD_CLR(new_client, &read_fd);
             close(new_client);
-            cout << "client is active: " << clients[client_id].active << "\n";
             cout << "Client " << client_id << " already connected.\n";
             return;
         }
     } else {
-        clients[client_id] = {new_client, true, client_id, ""};
+        clients[client_id] = {new_client, true, client_id, "", vector<string>()};
     }
 
     FD_SET(new_client, &read_fd);
@@ -100,16 +109,14 @@ struct udp_msg handle_udp_messages(int udp_sock) {
         number = ntohl(number);
         if (msg[0] == 1) { // daca avem un octet de semn 1 atunci avem un numar negativ
             strcpy(udp_message.data, "-");
-            memcpy(udp_message.data + 1, &number, sizeof(number));
+            strcat(udp_message.data, to_string(number).c_str());
         } else {
-            memcpy(udp_message.data, &number, sizeof(number));
-            cout << "Numarul este: " << number << "\n"; 
+            strcpy(udp_message.data, to_string(number).c_str());
         }
     }
-
     memset(udp_message.result, 0, MAX_UDP_MSG_SIZE);
     udp_message.port = ntohs(client_addr.sin_port);
-    memcpy(udp_message.ip, inet_ntoa(client_addr.sin_addr), sizeof(inet_ntoa(client_addr.sin_addr)));
+    strcpy(udp_message.ip, inet_ntoa(client_addr.sin_addr));
     strcpy(udp_message.result, udp_message.ip);
     strcat(udp_message.result, ":");
     strcat(udp_message.result, to_string(udp_message.port).c_str());
@@ -188,45 +195,70 @@ int main(int argc, char *argv[]) {
 
                 if (i == STDIN_FILENO) {
                     handle_stdin_input(clients, tcp_sock, udp_sock);
+                    continue;
                 }
 
-                if (i == tcp_sock) {
+                else if (i == tcp_sock) {
                     handle_tcp_client_connection(tcp_sock, clients, read_fd, max_fd);
+                    // continue;
                 }
 
-                if (i == udp_sock) {
+                else if (i == udp_sock) {
                     struct udp_msg udp_message;
                     // udp_message.port = ntohs()
                     udp_message = handle_udp_messages(udp_sock);
                     // uint32_t size = strlen(udp_message.)
                     for (auto client : clients) {
-                        if (client.second.active && strcmp(client.second.topic, udp_message.topic) == 0) {
-                            uint32_t size = strlen(udp_message.result);
-                            int bytes_sent = send(client.second.socket, &size, sizeof(uint32_t), 0);
-                            DIE (rc < 0, "send error in main");
-                            bytes_sent = send(client.second.socket, &udp_message, sizeof(udp_message), 0);
-                            DIE (rc < 0, "send error in main");
+                        if (client.second.active) {
+                            for (auto &topic : client.second.subscribed_topics) {
+                                if (topic.compare(udp_message.topic) == 0) {
+                                    uint32_t size = strlen(udp_message.result);
+                                    int bytes_sent = send(client.second.socket, &size, sizeof(uint32_t), 0);
+                                    DIE (rc < 0, "send error in main");
+                                    bytes_sent = send(client.second.socket, &udp_message.result, size, 0);
+                                    DIE (rc < 0, "send error in main");
+                                }
+                            }
                         }
                     }
-                }
+                    // continue;
+                } else {
+                    // handle message from client
+                    struct tcp_msg msg;
+                    uint32_t size;
+                    rc = recv(i, &size, sizeof(uint32_t), 0);
+                    rc = recv(i, &msg, size, 0);
+                    
+                    int type = atoi(&msg.type);
 
-                struct subscribe_msg msg;
-                uint32_t size;
-                rc = recv(i, &size, sizeof(uint32_t), 0);
-                rc = recv(i, &msg, size, 0);
-
-                if (rc == 0) {
-                    for (auto it = clients.begin(); it != clients.end(); ++it) {
-                        if (it->second.socket == i) {
-                            it->second.active = false;
-                            cout << "Client " << it->second.id << " disconnected.\n";
-                            FD_CLR(i, &read_fd);
-                            close(i);
-                            clients.erase(it);
+                    string client_id;
+                    for (auto &pair : clients) {
+                        if (pair.second.socket == i) {
+                            client_id = pair.second.id;
                             break;
                         }
                     }
+                    if (rc == 0) {
+                        clients[client_id].active = false;
+                        clients[client_id].socket = -1;
+                        cout << "Client " << client_id << " disconnected.\n";
+                        FD_CLR(i, &read_fd);
+                        FD_CLR(i, &temp_fd);
+                        close(i);
+                    } else {
+                        if (type == SUBSCRIBE) {
+                            clients[client_id].subscribed_topics.push_back(msg.data);
+                        } else if (type == UNSUBSCRIBE) {
+                            auto& subscribed_topics = clients[client_id].subscribed_topics;
+                            for (auto it = subscribed_topics.begin(); it != subscribed_topics.end(); ++it) {
+                                if (it->compare(msg.data) == 0) {
+                                    subscribed_topics.erase(it);
+                                    break;
+                                }
+                            }
 
+                        }
+                    }
                 }
             }
         }

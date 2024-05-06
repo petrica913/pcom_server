@@ -10,6 +10,7 @@
 #define SF_DISABLED 0
 #define SUBSCRIBE 1
 #define UNSUBSCRIBE 0
+#define EXIT 2
 #define MAX_IP 13
 
 
@@ -64,4 +65,6 @@ struct Client {
     bool active;
     std::string id;  // Adăugăm id-ul clientului în structură
 	char topic[TOPIC_LEN];
+	std::vector<std::string> subscribed_topics;
+
 };

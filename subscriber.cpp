@@ -70,6 +70,7 @@ int main(int argc, char *argv[]) {
     memcpy(&client_tcp_msg.data, client_id, MAX_CLIENT_ID);
     rc = (int) send(sockfd, &client_tcp_msg, sizeof(tcp_msg), 0);
     
+
     while(true) {
         temp_fds = read_fds;
 
@@ -91,18 +92,21 @@ int main(int argc, char *argv[]) {
             DIE(i > 2, "too many arguments");
 
             if (strcmp(arg[0], "exit") == 0) {
+                client_tcp_msg.type = '0' + EXIT;
                 break;
             } else if (strcmp(arg[0], "subscribe") == 0) {
-                msg.type = SUBSCRIBE;
+                client_tcp_msg.type = '0' + SUBSCRIBE;
+                strcpy(client_tcp_msg.data, arg[1]);
                 cout << "Subscribed to topic.\n";
             } else if (strcmp(arg[0], "unsubscribe") == 0) {
-                msg.type = UNSUBSCRIBE;
+                client_tcp_msg.type = '0' + UNSUBSCRIBE;
+                strcpy(client_tcp_msg.data, arg[1]);
                 cout << "Unsubscribed from topic.\n";
             }
-            uint32_t size = sizeof(msg);
+            uint32_t size = sizeof(client_tcp_msg);
             rc = send(sockfd, &size, sizeof(uint32_t), 0);
-            rc = send(sockfd, &msg, size, 0);
-        } else {
+            rc = send(sockfd, &client_tcp_msg, size, 0);
+        } else { // handle messages coming from the server
             memset(buffer, 0, MAX_UDP_MSG_SIZE);
             uint32_t size;
             rc = recv(sockfd, &size, sizeof(uint32_t), 0);
@@ -111,7 +115,7 @@ int main(int argc, char *argv[]) {
             if (strncmp(buffer, "exit", 4) == 0) {
                 break;
             }
-            // cout << buffer << "\n";
+            cout << buffer << "\n";
         }
     }
     close(sockfd);
