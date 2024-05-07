@@ -10,11 +10,24 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <regex>
+#include <set>
 
 #include "./structures.h"
 #include <cmath>
 
 using namespace std;
+
+bool matchTopic(const std::string& topic, const std::string& subscription) {
+    std::string regexStr = subscription;
+    
+    regexStr = std::regex_replace(regexStr, std::regex("\\*"), ".*");
+    regexStr = std::regex_replace(regexStr, std::regex("\\+"), "[^/]+");
+    std::regex regexPattern(regexStr);
+
+    return std::regex_match(topic, regexPattern);
+}
+
 
 void handle_stdin_input(const unordered_map<string, Client>& clients, int tcp_sock, int udp_sock) {
     string com;
@@ -108,7 +121,7 @@ struct udp_msg handle_udp_messages(int udp_sock) {
         uint32_t number;
         memcpy(&number, msg + 1, sizeof(uint32_t));
         number = ntohl(number);
-        if (msg[0] == 1) { // daca avem un octet de semn 1 atunci avem un numar negativ
+        if (msg[0] == 1 && number != 0) { // daca avem un octet de semn 1 atunci avem un numar negativ
             strcpy(udp_message.data, "-");
             strcat(udp_message.data, to_string(number).c_str());
         } else {
@@ -147,16 +160,9 @@ struct udp_msg handle_udp_messages(int udp_sock) {
 
     memset(udp_message.result, 0, MAX_UDP_MSG_SIZE);
     udp_message.port = ntohs(client_addr.sin_port);
-    strcpy(udp_message.ip, inet_ntoa(client_addr.sin_addr));
-    strcpy(udp_message.result, udp_message.ip);
-    strcat(udp_message.result, ":");
-    strcat(udp_message.result, to_string(udp_message.port).c_str());
-    strcat(udp_message.result, " - ");
-    strcat(udp_message.result, udp_message.topic);
-    strcat(udp_message.result, " - ");
-    strcat(udp_message.result, udp_message.data_type);
-    strcat(udp_message.result, " - ");
-    strcat(udp_message.result, udp_message.data);
+    sprintf(udp_message.result, "%s:%d - %s - %s - %s"
+            , inet_ntoa(client_addr.sin_addr), udp_message.port, udp_message.topic
+            , udp_message.data_type, udp_message.data);
 
     return udp_message;
 }
@@ -238,16 +244,20 @@ int main(int argc, char *argv[]) {
                     struct udp_msg udp_message;
                     // udp_message.port = ntohs()
                     udp_message = handle_udp_messages(udp_sock);
+                    std::set<std::string> sent_topics;
                     // uint32_t size = strlen(udp_message.)
                     for (auto client : clients) {
                         if (client.second.active) {
                             for (auto &topic : client.second.subscribed_topics) {
-                                if (topic.compare(udp_message.topic) == 0) {
-                                    uint32_t size = strlen(udp_message.result);
-                                    int bytes_sent = send(client.second.socket, &size, sizeof(uint32_t), 0);
-                                    DIE (rc < 0, "send error in main");
-                                    bytes_sent = send(client.second.socket, &udp_message.result, size, 0);
-                                    DIE (rc < 0, "send error in main");
+                                if (matchTopic(udp_message.topic, topic)) {
+                                    if (sent_topics.find(udp_message.topic) == sent_topics.end()) {
+                                        sent_topics.insert(udp_message.topic);
+                                        uint32_t size = strlen(udp_message.result);
+                                        int bytes_sent = send(client.second.socket, &size, sizeof(uint32_t), 0);
+                                        DIE (rc < 0, "send error in main");
+                                        bytes_sent = send(client.second.socket, &udp_message.result, size, 0);
+                                        DIE (rc < 0, "send error in main");
+                                    }
                                 }
                             }
                         }
