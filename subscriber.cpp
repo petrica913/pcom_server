@@ -53,13 +53,13 @@ int main(int argc, char *argv[]) {
     memcpy(client_id, argv[1], sizeof(argv[1]));
     size_id = strlen(client_id);
 
+    // set file descriptors
     fd_set read_fds;
     FD_ZERO(&read_fds);
     FD_SET(0, &read_fds);
 
     fd_set temp_fds;
     FD_ZERO(&temp_fds);
-
     FD_SET(sockfd, &read_fds);
 
     int max_fd = sockfd;
@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
     while(true) {
         temp_fds = read_fds;
 
-        rc = select(max_fd + 1, &temp_fds, nullptr, nullptr, nullptr);
+        rc = select(max_fd + 1, &temp_fds, NULL, NULL, NULL);
         DIE(rc < 0, "select");
 
         if (FD_ISSET(STDIN_FILENO, &temp_fds)) {
@@ -84,10 +84,10 @@ int main(int argc, char *argv[]) {
             int i = 0;
             struct subscribe_msg msg;
 
-            while (token != nullptr) {
+            while (token != NULL) {
                 arg[i] = token;
                 i++;
-                token = strtok(nullptr, " ");
+                token = strtok(NULL, " ");
             }
             DIE(i > 2, "too many arguments");
 

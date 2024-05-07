@@ -67,14 +67,13 @@ void handle_tcp_client_connection(int tcp_sock, unordered_map<string, Client>& c
             clients[client_id].socket = new_client;
             clients[client_id].active = true;
         } else {
-            char msg[5] = "exit";
-            uint32_t size = strlen(msg);
 
             // send exit message to client
-            rc = send(new_client, &size, sizeof(uint32_t), 0);
+            uint32_t size = strlen("exit");
+            rc = send(new_client, &size ,sizeof(uint32_t), 0);
             DIE(rc < 0, "send() failed");
 
-            rc = send(new_client, msg, size, 0);
+            rc = send(new_client, "exit", 5, 0);
             DIE(rc < 0, "send() failed");
             FD_CLR(new_client, &read_fd);
             close(new_client);
@@ -105,7 +104,7 @@ struct udp_msg handle_udp_messages(int udp_sock) {
     DIE (rc < 0, "recvfrom handle_udp error\n");
 
     memset(udp_message.topic, 0, TOPIC_LEN + 1);
-    memcpy(udp_message.topic, buffer, 50); // VEZI aici cum gestionezi topicul cu wildcarduri
+    memcpy(udp_message.topic, buffer, 50);
     memset(udp_message.data, 0, MAX_UDP_PAYLOAD_SIZE + 1);
 
     char msg[MAX_UDP_PAYLOAD_SIZE + 1];
@@ -121,14 +120,14 @@ struct udp_msg handle_udp_messages(int udp_sock) {
         uint32_t number;
         memcpy(&number, msg + 1, sizeof(uint32_t));
         number = ntohl(number);
-        if (msg[0] == 1 && number != 0) { // daca avem un octet de semn 1 atunci avem un numar negativ
+        if (msg[0] == 1 && number != 0) {
             strcpy(udp_message.data, "-");
             strcat(udp_message.data, to_string(number).c_str());
         } else {
             strcpy(udp_message.data, to_string(number).c_str());
         }
     }
-    if (type == 1) { //SHORT_REAL
+    if (type == 1) { // SHORT_REAL
         udp_message.type = 1;
         memcpy(udp_message.data_type, "SHORT_REAL", MAX_DATA_TYPE);
         float number = abs (ntohs(*(uint16_t *)msg));
@@ -237,15 +236,12 @@ int main(int argc, char *argv[]) {
 
                 else if (i == tcp_sock) {
                     handle_tcp_client_connection(tcp_sock, clients, read_fd, max_fd);
-                    // continue;
                 }
 
                 else if (i == udp_sock) {
                     struct udp_msg udp_message;
-                    // udp_message.port = ntohs()
                     udp_message = handle_udp_messages(udp_sock);
                     std::set<std::string> sent_topics;
-                    // uint32_t size = strlen(udp_message.)
                     for (auto client : clients) {
                         if (client.second.active) {
                             for (auto &topic : client.second.subscribed_topics) {
@@ -262,7 +258,6 @@ int main(int argc, char *argv[]) {
                             }
                         }
                     }
-                    // continue;
                 } else {
                     // handle message from client
                     struct tcp_msg msg;
