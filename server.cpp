@@ -263,7 +263,9 @@ int main(int argc, char *argv[]) {
                     struct tcp_msg msg;
                     uint32_t size;
                     rc = recv(i, &size, sizeof(uint32_t), 0);
+                    DIE(rc < 0, "recv error");
                     rc = recv(i, &msg, size, 0);
+                    DIE(rc < 0, "recv error");
                     
                     int type = atoi(&msg.type);
 

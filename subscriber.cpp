@@ -82,7 +82,6 @@ int main(int argc, char *argv[]) {
             char *token = strtok(buffer, " ");
             char *arg[25];
             int i = 0;
-            struct subscribe_msg msg;
 
             while (token != NULL) {
                 arg[i] = token;

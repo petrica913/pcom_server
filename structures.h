@@ -35,11 +35,6 @@ struct tcp_msg {
 	char data[MAX_TCP_PAYLOAD_SIZE];
 };
 
-struct subscribe_msg {
-	int type;
-	char topic[TOPIC_LEN + 1];
-};
-
 struct Client {
     int socket;
     bool active;
